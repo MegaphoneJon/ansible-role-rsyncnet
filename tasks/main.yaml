@@ -1,10 +1,23 @@
+- name: get the ansible_env on nosudo to find the user's home dir
+  setup:
+    filter: ansible_env
+  when: "'nosudo' in group_names"
+
+- name: Set the backup user
+  ansible.builtin.set_fact:
+    backup_user: "{{ ansible_user if 'nosudo' in group_names else 'root' }}"
+
+- name: Set the backup home dir
+  ansible.builtin.set_fact:
+    backup_user_home: "{{ ansible_env.HOME if 'nosudo' in group_names else '/root' }}"
+
 - name: create a keypair for root
   user:
-    name: root
+    name: "{{ backup_user }}"
     generate_ssh_key: yes
 
 - name: get the public key
-  command: cat /root/.ssh/id_rsa.pub
+  command: "cat {{ backup_user_home }}/.ssh/id_rsa.pub"
   register: publickey
   changed_when: false
 
@@ -21,6 +34,12 @@
   become: no
   when: publickey.stdout not in installed_keys.stdout_lines
 
+- name: Add the rsync.net public hostkey to known_hosts
+  known_hosts:
+    key: "{{ rsyncnet_public_hostkey }}"
+    name: usw-s008.rsync.net
+  when: "'nosudo' in group_names"
+
 - name: Check if the remote repo exists
   command: ssh {{ rsyncnet_user }}@{{ rsyncnet_server }} ls -l "{{ client + '-' + hostname + '/config' }}"
   register: remoterepo
@@ -32,5 +51,6 @@
   command: "borg init {{ rsyncnet_user }}@{{ rsyncnet_server }}:{{ client + '-' + hostname }} -e repokey --remote-path=/usr/local/bin/borg1/borg1"
   environment:
     BORG_PASSPHRASE: "{{ lookup('passwordstore', client + '/' + hostname + '/borg/remote create=true length=32') }}"
+  delegate_to: 127.0.0.1
   when: remoterepo.rc == 1
 
