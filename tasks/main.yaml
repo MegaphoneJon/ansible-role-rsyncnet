@@ -38,7 +38,7 @@
   known_hosts:
     key: "{{ rsyncnet_public_hostkey }}"
     name: usw-s008.rsync.net
-  when: "'nosudo' in group_names"
+  become: "{{ 'no' if 'nosudo' in group_names else 'yes' }}"
 
 - name: Check if the remote repo exists
   command: ssh {{ rsyncnet_user }}@{{ rsyncnet_server }} ls -l "{{ client + '-' + hostname + '/config' }}"
@@ -52,5 +52,6 @@
   environment:
     BORG_PASSPHRASE: "{{ lookup('passwordstore', client + '/' + hostname + '/borg/remote create=true length=32') }}"
   delegate_to: 127.0.0.1
+  become: no
   when: remoterepo.rc == 1
 
