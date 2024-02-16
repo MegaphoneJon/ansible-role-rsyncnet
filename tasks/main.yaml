@@ -50,7 +50,7 @@
 - name: Create a borg repo on rsync.net
   command: "borg init {{ rsyncnet_user }}@{{ rsyncnet_server }}:{{ client + '-' + hostname }} -e repokey --remote-path=/usr/local/bin/borg1/borg1"
   environment:
-    BORG_PASSPHRASE: "{{ lookup('passwordstore', client + '/' + hostname + '/borg/remote create=true length=32') }}"
+    BORG_PASSPHRASE: "{{ lookup('community.general.passwordstore', client + '/' + hostname + '/borg/remote create=true length=32') }}"
   delegate_to: 127.0.0.1
   become: no
   when: remoterepo.rc == 1
