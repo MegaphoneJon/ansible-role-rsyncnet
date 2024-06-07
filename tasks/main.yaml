@@ -9,7 +9,13 @@
 
 - name: Set the ssh key location
   ansible.builtin.set_fact:
-    ssh_key_location: "{{ ansible_env.HOME + '/include/megaphone/ssh' if 'mayfirst-ng' in group_names else ( ansible_env.HOME + '/.ssh' if 'nosudo' in group_names else '/root/.ssh') }}"
+    ssh_key_location: "{{ ansible_env.HOME + '/include/megaphone/ssh' if 'mayfirst_ng' in group_names else ( ansible_env.HOME + '/.ssh' if 'nosudo' in group_names else '/root/.ssh') }}"
+
+- name: Set the repo name(s) - with no sudo
+  ansible.builtin.set_fact:
+    reponame: "{{ reponame|default([]) + [client + '-' + hostname + '-' + item.key] }}"
+  loop: "{{ sites|dict2items }}"
+  when: "'nosudo' in group_names"
 
 - name: create a keypair for backup user
   user:
@@ -43,18 +49,26 @@
     path: "{{ ssh_key_location + '/known_hosts' }}"
   become: "{{ 'no' if 'nosudo' in group_names else 'yes' }}"
 
+- name: Set the repo name - with sudo
+  ansible.builtin.set_fact:
+    reponame: 
+      - "{{ client + '-' + hostname }}"
+  when: "'nosudo' not in group_names"
+
 - name: Check if the remote repo exists
-  command: ssh  -o UserKnownHostsFile={{ ssh_key_location + '/known_hosts' }} -i {{ ssh_key_location + '/id_ed25519' }} {{ rsyncnet_user }}@{{ rsyncnet_server }} ls -l "{{ client + '-' + hostname + '/config' }}"
+  command: ssh  -o UserKnownHostsFile={{ ssh_key_location + '/known_hosts' }} -i {{ ssh_key_location + '/id_ed25519' }} {{ rsyncnet_user }}@{{ rsyncnet_server }} ls -l "{{ item + '/config' }}"
   register: remoterepo
+  loop: "{{ reponame }}"
   changed_when: false
   failed_when: false
 
   # FIXME: Once Debian 10 ships and we have borgbackup 1.1+ on all systems, change the encryption to blake2b.
 - name: Create a borg repo on rsync.net
-  command: "borg init {{ rsyncnet_user }}@{{ rsyncnet_server }}:{{ client + '-' + hostname }} -e repokey --remote-path=/usr/local/bin/borg1/borg1"
+  command: "borg init {{ rsyncnet_user }}@{{ rsyncnet_server }}:{{ item.item }} -e repokey --remote-path=/usr/local/bin/borg1/borg1"
   environment:
     BORG_PASSPHRASE: "{{ lookup('community.general.passwordstore', client + '/' + hostname + '/borg/remote create=true length=32') }}"
   delegate_to: 127.0.0.1
+  loop: "{{ remoterepo.results }}"
   become: no
-  when: remoterepo.rc == 1
+  when: item.rc == 1
 
