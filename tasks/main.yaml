@@ -45,7 +45,7 @@
 - name: Add the rsync.net public hostkey to known_hosts
   known_hosts:
     key: "{{ rsyncnet_public_hostkey }}"
-    name: usw-s008.rsync.net
+    name: "{{ rsyncnet_server }}"
     path: "{{ ssh_key_location + '/known_hosts' }}"
   become: "{{ 'no' if 'nosudo' in group_names else 'yes' }}"
 
