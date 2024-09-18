@@ -1,3 +1,4 @@
+# This role is kinda wild in that you can run it against either a server or a site.
 - name: get the ansible_env on nosudo to find the user's home dir
   setup:
     filter: ansible_env
@@ -9,13 +10,19 @@
 
 - name: Set the ssh key location
   ansible.builtin.set_fact:
-    ssh_key_location: "{{ ansible_env.HOME + '/include/megaphone/ssh' if 'mayfirst_ng' in group_names else ( ansible_env.HOME + '/.ssh' if 'nosudo' in group_names else '/root/.ssh') }}"
+    ssh_key_location: "{{ ansible_env.HOME + '/include/megaphone/ssh' if 'mayfirst_ng_site' in group_names else ( ansible_env.HOME + '/.ssh' if 'nosudo' in group_names else '/root/.ssh') }}"
 
-- name: Set the repo name(s) - with no sudo
+- name: Set the repo name - with sudo (server-level)
   ansible.builtin.set_fact:
-    reponame: "{{ reponame|default([]) + [client + '-' + hostname + '-' + item.key] }}"
-  loop: "{{ sites|dict2items }}"
-  when: "'nosudo' in group_names"
+    reponame: "{{ client }}-{{ hostname }}"
+    passphrase: "{{ lookup('community.general.passwordstore', client + '/' + hostname + '/borg/remote create=true length=32') }}"
+  when: "'nosudo' not in group_names and 'mayfirst_ng_site' not in group_names"
+
+- name: Set the repo name(s) - with no sudo (site-level)
+  ansible.builtin.set_fact:
+    reponame: "{{ client }}-{{ hostname }}-{{ bare_url }}"
+    passphrase: "{{ lookup('community.general.passwordstore', client + '/' + hostname + '/' + bare_url + '/borg/remote create=true length=32') }}"
+  when: "'nosudo' in group_names or 'mayfirst_ng_site' in group_names"
 
 - name: create a keypair for backup user
   user:
@@ -47,28 +54,20 @@
     key: "{{ rsyncnet_public_hostkey }}"
     name: "{{ rsyncnet_server }}"
     path: "{{ ssh_key_location + '/known_hosts' }}"
-  become: "{{ 'no' if 'nosudo' in group_names else 'yes' }}"
-
-- name: Set the repo name - with sudo
-  ansible.builtin.set_fact:
-    reponame: 
-      - "{{ client + '-' + hostname }}"
-  when: "'nosudo' not in group_names"
+  become: "{{ 'no' if ('nosudo' in group_names or 'mayfirst_ng_site' in group_names) else 'yes' }}"
 
 - name: Check if the remote repo exists
-  command: ssh  -o UserKnownHostsFile={{ ssh_key_location + '/known_hosts' }} -i {{ ssh_key_location + '/id_ed25519' }} {{ rsyncnet_user }}@{{ rsyncnet_server }} ls -l "{{ item + '/config' }}"
+  command: ssh  -o UserKnownHostsFile={{ ssh_key_location + '/known_hosts' }} -i {{ ssh_key_location + '/id_ed25519' }} {{ rsyncnet_user }}@{{ rsyncnet_server }} ls -l "{{ reponame + '/config' }}"
   register: remoterepo
-  loop: "{{ reponame }}"
   changed_when: false
   failed_when: false
 
   # FIXME: Once Debian 10 ships and we have borgbackup 1.1+ on all systems, change the encryption to blake2b.
 - name: Create a borg repo on rsync.net
-  command: "borg init {{ rsyncnet_user }}@{{ rsyncnet_server }}:{{ item.item }} -e repokey --remote-path=/usr/local/bin/borg1/borg1"
+  command: "borg init {{ rsyncnet_user }}@{{ rsyncnet_server }}:{{ reponame }} -e repokey --remote-path=/usr/local/bin/borg1/borg1"
   environment:
-    BORG_PASSPHRASE: "{{ lookup('community.general.passwordstore', client + '/' + hostname + '/borg/remote create=true length=32') }}"
+    BORG_PASSPHRASE: "{{ passphrase }}"
   delegate_to: 127.0.0.1
-  loop: "{{ remoterepo.results }}"
   become: no
-  when: item.rc == 1
+  when: remoterepo.rc == 1
 
